@@ -1,9 +1,25 @@
 import requests
 
-division = "YOUR_CAMPUS_HERE" # "ERIN" for UTM and "ARTSC" for UTSG
-sessions = ["SESSSIONS_LIST_HERE"] # Format is "YYYY9" for Fall, "YYYY1" for Winter, [20259, 20261]
-course_code = ["COURSE_CODES_HERE"] # List of course codes to check, e.g., ["MAT223H5", "CSC207H5"]
-sections = [['YOUR_SECTIONS_HERE']] # List of sections to check, e.g., [['PRA0101', 'PRA0119']] sections for each course is a nestedlist
+# Format:
+# Dvision: Campus/division code. Examples: "ERIN" (UTM), "ARTSC" (UTSG FAS).
+# Sessions: Session codes as strings. Examples: "YYYY9" (Fall), "YYYY1" (Winter). Example: "20259".
+# Course Code: Full name of course including campus suffix. Example: 'MAT224H5'
+# Sections: A list of sections you want alerts for. Examples: ["TUT0103", "TUT0104", "PRA0119"].
+# User ID: Discord user ID to mention in the message. Example: "700329119761448910".
+# CHECK README.MD FOR FULL LIST
+
+# Example:
+# courses = [
+#     {
+#         'division': 'ERIN',
+#         'sessions': '20259',
+#         'course_code': 'MAT224H5',
+#         'sections': ['TUT0103'],
+#         'user_id': '700329119761448910'
+#     }
+# ]  # list of dicts
+
+courses = [{'division': "", 'sessions': "", 'course_code': "", 'sections': [''], 'user_id': ''}]
 
 url = "https://api.easi.utoronto.ca/ttb/getPageableCourses"
 
@@ -13,57 +29,69 @@ headers = {
     "Referer": "https://ttb.utoronto.ca/"
 }
 
-page = 1
-page_size = 20
-start_marker = r'<courses><courses>'
-end_marker = r'<cmCourseInfo>'
+PAGE = 1
+PAGE_SIZE = 20
 
-def send_discord_message(message: str):
+START_MARKER = r'<courses><courses>'
+END_MARKER = r'<cmCourseInfo>'
+
+CURR_ENROL_STAG = "<currentEnrolment>"
+CURR_ENROL_ETAG = "</currentEnrolment>"
+MAX_ENROL_STAG = "<maxEnrolment>"
+MAX_ENROL_ETAG = "</maxEnrolment>"
+
+
+def send_discord_message(message: str, user: str):
     webhook_url = r"YOUR_DISCORD_WEBHOOK_URL_HERE" # Put your Discord webhook URL here, found in server settings under Integrations
+    message += f"<@{user}>"
     data = {"content": message}
     requests.post(webhook_url, json=data)
 
 
-for i in range(len(course_code)):
+for course in courses:
     payload = {
-        "courseCodeAndTitleProps": {"courseCode": course_code[i], "courseTitle": "", "courseSectionCode": ""},
+        "courseCodeAndTitleProps": {"courseCode": course['course_code'], "courseTitle": "", "courseSectionCode": ""},
         "departmentProps": [],
         "campuses": [],
-        "sessions": sessions,
+        "sessions": [course['sessions']],
         "requirementProps": [],
         "instructor": "",
         "courseLevels": [],
         "deliveryModes": [],
         "dayPreferences": [],
         "timePreferences": [],
-        "divisions": [division],
+        "divisions": [course['division']],
         "creditWeights": [],
         "availableSpace": False,
         "waitListable": False,
-        "page": 1,
-        "pageSize": 20,
+        "page": PAGE,
+        "pageSize": PAGE_SIZE,
         "direction": "asc"
     }
 
     response = requests.post(url, headers=headers, json=payload)
     text = response.text
 
-    start_pos = text.find(start_marker)
-    end_pos = text.find(end_marker, start_pos)
+    start_pos = text.find(START_MARKER)
+    end_pos = text.find(END_MARKER, start_pos)
 
     extracted_snippet = text[start_pos:end_pos]
 
-    for section in sections[i]:
+    for section in course['sections']:
         section_start_pos = text.find(section)
-        curr_enrol_pos = text.find("<currentEnrolment>", section_start_pos)
-        max_enrol_pos = text.find("<maxEnrolment>", curr_enrol_pos)
-        
-        current_enrollement = int(text[curr_enrol_pos + len("<currentEnrolment>"):curr_enrol_pos + len("<currentEnrolment>") + 2].strip('<'))
-        max_enrollement = int(text[max_enrol_pos + len("<maxEnrolment>"):max_enrol_pos + len("<maxEnrolment>") + 2].strip('<'))
+        curr_enrol_spos = text.find(CURR_ENROL_STAG, section_start_pos)
+        curr_enrol_epos = text.find(CURR_ENROL_ETAG, curr_enrol_spos)
+
+        max_enrol_spos = text.find(MAX_ENROL_STAG, curr_enrol_epos)
+        max_enrol_epos = text.find(MAX_ENROL_ETAG, max_enrol_spos)
+
+        current_enrollement = int(text[curr_enrol_spos + len(CURR_ENROL_STAG): curr_enrol_epos])
+        max_enrollement = int(text[max_enrol_spos + len(MAX_ENROL_STAG): max_enrol_epos])
 
         if current_enrollement < max_enrollement:
-            message = f"There are {max_enrollement - current_enrollement} spots available in section {section} in course {course_code[i]}."
-            send_discord_message(message)
-        else:
-            message = f"Section {section} of course {course_code[i]} is full."
-            send_discord_message(message)
+            message = f"There are {max_enrollement - current_enrollement} spots available in section {section} in course {course['course_code']}."
+            send_discord_message(message, course['user_id'])
+        # Not really useful but just in case you want a message of its full
+        # else:
+        #     message = f"Section {section} of course {course['course_code']} is full."
+        #     send_discord_message(message, course['user_id'])
