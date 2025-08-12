@@ -1,5 +1,8 @@
+import os
 import aiohttp
 from collections import defaultdict
+from dotenv import load_dotenv
+from supabase import create_client
 
 url = "https://api.easi.utoronto.ca/ttb/getPageableCourses"
 
@@ -19,18 +22,66 @@ CURR_ENROL_STAG = "<currentEnrolment>"
 CURR_ENROL_ETAG = "</currentEnrolment>"
 MAX_ENROL_STAG = "<maxEnrolment>"
 MAX_ENROL_ETAG = "</maxEnrolment>"
-open_courses = []
+
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 def group_by_course_and_session(data):
     grouped = defaultdict(list)
     for item in data:
-        key = (item['course_code'], item['sessions'], item['division'])
-        grouped[key].append(item)
+        course = item.get('course_data')
+
+        if not course:
+            continue
+
+        key = (course.get('course_code'), course.get('sessions'), course.get('division'))
+
+        if None in key:
+            continue
+        
+        grouped[key].append(course)
     return grouped
+
+def get_user_entries(user_id: str):
+    response = supabase.table("courses").select("*").eq("user_id", user_id).execute()
+    
+    if response.data is None:
+        raise Exception("Failed to fetch entries from Supabase.")
+    
+    return response.data or []
+
+def add_user_entry(user_id: str, course_dict: dict):
+    record = {
+        "user_id": user_id,
+        "course_data": course_dict,
+        "course": course_dict.get("course_code") or ""
+    }
+    response = supabase.table("courses").insert(record).execute()
+
+    if not response.data:
+        raise Exception("Failed to add entry.")
+    
+    return response.data
+
+def delete_user_entry(entry_id: int):
+    response = supabase.table("courses").delete().eq("id", entry_id).execute()
+
+    if response.data is None:
+        raise Exception("Failed to delete entry")
+
+    return response.data
+
+def get_all_courses():
+    response = supabase.table("courses").select("*").execute()
+    
+    return response.data or []
 
 async def get_course_data(data: list[dict]):
     grouped_data = group_by_course_and_session(data)
-    course_data = []
+    open_courses = []
 
     for (course_code, session, division), courses in grouped_data.items():
         payload = {

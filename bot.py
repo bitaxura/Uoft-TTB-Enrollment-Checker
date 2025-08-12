@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
-from api_bot import get_course_data
+from api_bot import get_course_data, add_user_entry, delete_user_entry, get_user_entries, get_all_courses
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -16,8 +16,6 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-all_courses = []
-
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
@@ -28,52 +26,53 @@ async def ping(ctx):
     await ctx.send("Pong!")
 
 @bot.command()
-async def add(ctx, *, text: str):
-    try:
-        data = ast.literal_eval(text)
-    except Exception as e:
-        await ctx.send("Error adding course please fix format")
-        return
-    
-    data['user_id'] = str(ctx.author.id)
-    all_courses.append(data)
+async def add(ctx, *, course_json: str):
+    user_id = str(ctx.author.id)
+    course_dict = ast.literal_eval(course_json)
+    course_dict['user_id'] = user_id
 
-    await ctx.send("Added course")
+    add_user_entry(user_id, course_dict)
+    
+    await ctx.send(f"Added course: {course_dict.get('course_code', 'unknown')}")
 
 @bot.command()
 async def delete(ctx, *, number: int):
-    user_entries = [e for e in all_courses if e['user_id'] == str(ctx.author.id)]
-    if not user_entries:
+    user_id = str(ctx.author.id)
+    entries = get_user_entries(user_id)
+
+    if not entries:
         await ctx.send("You have no entries.")
         return
 
-    if number < 1 or number > len(user_entries):
+    if number < 1 or number > len(entries):
         await ctx.send("Invalid entry number.")
         return
-    
-    to_delete = user_entries[number - 1]
-    all_courses.remove(to_delete)
-    await ctx.send(f"Deleted course: {to_delete}")
+
+    entry_to_delete = entries[number - 1]
+    delete_user_entry(entry_to_delete['id'])
+    await ctx.send(f"Deleted course: {entry_to_delete['course']}")
 
 @bot.command()
 async def myentries(ctx):
-    user_entries = [e for e in all_courses if e['user_id'] == str(ctx.author.id)]
+    user_id = str(ctx.author.id)
+    entries = get_user_entries(user_id)
 
-    if not user_entries:
+    if not entries:
         await ctx.send("You have no entries.")
         return
-    
-    message_lines = ["Your Entries: "]
-    for i, entry in enumerate(user_entries, 1):
-        message_lines.append(f"{i}. {entry}")
+
+    message_lines = ["Your Entries:"]
+    for i, entry in enumerate(entries, 1):
+        message_lines.append(f"{i}. {entry['course']}")
 
     await ctx.send("\n".join(message_lines))
 
-@tasks.loop(hours=6)
+@tasks.loop(hours=8)
 async def check_courses():
     await check_courses_logic()
 
 async def check_courses_logic():
+    all_courses = get_all_courses()
     if not all_courses:
         return
     open_courses = await get_course_data(all_courses)
@@ -82,6 +81,7 @@ async def check_courses_logic():
         await channel.send("\n".join(open_courses))
 
 @bot.command()
+@commands.has_permissions(administrator=True)
 async def run_api(ctx):
     await check_courses_logic()
     await ctx.send("API check started.")
